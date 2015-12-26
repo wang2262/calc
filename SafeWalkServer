@@ -1,0 +1,192 @@
+/**
+ * Project 5
+ * @author Danyang Wang, wang2262, 814
+ * @author Joshua Saliutama, jsaliuta, LN4
+ */
+import java.util.*;
+import java.io.*;
+import java.net.*;
+
+public class SafeWalkServer implements Runnable {
+	int port;
+	ServerSocket ss;
+	private List<RequestInfo> requestInfo = new ArrayList<>();
+
+	public SafeWalkServer(int port) throws IOException {
+		this.port = port;
+		ss = new ServerSocket(port);
+	}
+
+	public SafeWalkServer() throws IOException {
+		ss = new ServerSocket(0);
+		this.port = ss.getLocalPort();
+	}
+
+	public void run() {
+		mainloop: while (true) {
+			try {
+				Socket client = ss.accept();
+				BufferedReader in = new BufferedReader(new InputStreamReader(
+						client.getInputStream()));
+				String request = in.readLine();
+				if (request == null || request.isEmpty()) {
+					client.close();
+					continue;
+				}
+				PrintWriter pw = new PrintWriter(client.getOutputStream(), true);
+				if (request.indexOf(":") != -1) {
+					if (request.equals(":LIST_PENDING_REQUESTS")) {
+						pw.println(requestInfo.toString());
+					} else if (request.equals(":RESET")) {
+
+						for (int i = 0; i < requestInfo.size(); i++) {
+							PrintWriter pw2 = new PrintWriter(
+									requestInfo.get(i).socket.getOutputStream(),
+									true);
+							pw2.println("ERROR: connection reset");
+							pw2.close();
+						}
+						requestInfo.clear();
+						pw.println("RESPONSE: success");
+						pw.close();
+
+						client.close();
+						continue;
+					} else if (request.equals(":SHUTDOWN")) {
+						for (int i = 0; i < requestInfo.size(); i++) {
+							PrintWriter pw2 = new PrintWriter(
+									requestInfo.get(i).socket.getOutputStream(),
+									true);
+							pw2.println("ERROR: connection reset");
+							pw2.close();
+						}
+						requestInfo.clear();
+						pw.println("RESPONSE: success");
+						pw.close();
+
+						client.close();
+						break;
+					} else {
+						pw.println("ERROR: invalid request");
+						client.close();
+						continue;
+					}
+				} else {
+					try {
+						RequestInfo info = new RequestInfo(request, client);
+						Iterator<RequestInfo> iterator = requestInfo.iterator();
+						while (iterator.hasNext()) {
+							RequestInfo r = iterator.next();
+							System.err.println(info.matches(r));
+							if (info.matches(r)) {
+								PrintWriter pw2 = new PrintWriter(
+										r.socket.getOutputStream());
+								pw2.println("RESPONSE: "
+										+ info.toStringNoBrackets());
+								pw.println("RESPONSE: "
+										+ r.toStringNoBrackets());
+								iterator.remove();
+								pw.close();
+								pw2.close();
+								continue mainloop;
+							}
+						}
+						requestInfo.add(info);
+						System.err.println("added " + info);
+					} catch (IllegalArgumentException e) {
+						pw.println("ERROR: invalid request");
+						System.err.println("ERROR: invalid request");
+						client.close();
+						continue;
+					}
+
+				}
+			} catch (IOException e) {
+			}
+		}
+	}
+
+	static Set<String> locations = new HashSet();
+	static {
+		locations.addAll(Arrays
+				.asList("CL50", "EE", "PUSH", "PMU", "LWSN", "*"));
+	}
+
+	class RequestInfo {
+		String name;
+		String from;
+		String to;
+		int priority;
+		Socket socket;
+
+		RequestInfo(String request, Socket socket) {
+			System.err.println(request);
+			this.socket = socket;
+			String[] array = request.split(",");
+			if (array.length != 4) {
+				throw new IllegalArgumentException();
+			}
+			this.name = array[0];
+			this.from = array[1];
+			this.to = array[2];
+			try {
+				this.priority = Integer.parseInt(array[3]);
+			} catch (NumberFormatException e) {
+				throw new IllegalArgumentException();
+			}
+			if (!locations.contains(from) || !locations.contains(to)
+					|| from.equals(to) || from.equals("*") || name.isEmpty()
+					|| priority < 0) {
+				throw new IllegalArgumentException();
+			}
+		}
+
+		boolean matches(RequestInfo info) {
+			if (from.equals(info.from)) {
+				if (to.equals(info.to)) {
+					return !to.equals("*");
+				} else
+					return to.equals("*") || info.to.equals("*");
+			} else {
+				System.err.println("from does not match");
+			}
+			return false;
+		}
+
+		@Override
+		public String toString() {
+			return "[" + toStringNoBrackets().replaceAll(",", ", ") + "]";
+		}
+
+		public String toStringNoBrackets() {
+			return name + "," + from + "," + to + "," + priority;
+		}
+	}
+
+	public int getLocalPort() {
+		port = ss.getLocalPort();
+		return port;
+	}
+
+	public static void main(String[] args) {
+		if (args.length == 1) {
+			int p = Integer.parseInt(args[0]);
+			if (p >= 1025 && p <= 65535) {
+				try {
+					SafeWalkServer sws = new SafeWalkServer(p);
+					sws.run();
+				} catch (IOException e) {
+				}
+			} else
+				System.out.println("ERROR: invalid port");
+
+		} else {
+			try {
+				SafeWalkServer sws = new SafeWalkServer();
+				System.out.println(sws.getLocalPort());
+				sws.run();
+			} catch (IOException e) {
+			}
+		}
+	}
+}
